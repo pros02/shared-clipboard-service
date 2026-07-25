@@ -1,34 +1,54 @@
 """Automatic-receive polling state machine.
 
-Framework-agnostic: this class does no sleeping/threading/Qt itself. A
+Framework-agnostic: this class does no sleeping/threading/Qt itself, and
+— unlike ClipboardService.receive() — never touches the clipboard. A
 caller (a GUI QTimer, a background thread, or a test loop) is expected
 to call poll_once() repeatedly, waiting next_interval_seconds between
-calls. That external loop is what actually drives "automatic" receive —
-this class only decides what a given tick should do and how long to
-wait before the next one, per docs/design/requirements_review_v0.1.md
-section 3.1: a configurable base interval (0.5/1/2/5s) that backs off
-to 5s, then up to 30s, while the NAS is unreachable, and recovers to the
-configured interval once it's reachable again.
+calls, and to write outcome.content to the clipboard itself when
+outcome.status is RECEIVED. That split matters because poll_once() can
+block for a long time (see below), so it must be safe to run entirely
+off the Qt main thread; only the final clipboard write needs that
+thread (QClipboard is not thread-safe).
+
+Backoff, per docs/design/requirements_review_v0.1.md section 3.1: a
+configurable base interval (0.5/1/2/5s) that backs off to 5s, then up
+to 30s, while the NAS is unreachable, and recovers to the configured
+interval once it's reachable again.
+
+A live test against an unreachable NAS host (not just a missing share
+on a reachable one) found that Path.exists()/stat() do not raise for
+that failure mode on Windows — they silently return "doesn't exist"
+after a real ~21s network timeout. That means the naive
+"except OSError: back off" logic never triggers for the single most
+realistic disconnect scenario (NAS powered off / cable unplugged), and
+the fact that it takes ~21s per attempt makes the same call unsafe to
+run on the GUI's main thread. Detect that slow-response case
+heuristically instead: any peek_current() call taking longer than
+_SLOW_RESPONSE_THRESHOLD_SECONDS is treated as a failure for backoff
+purposes even if it didn't raise. A healthy read is a small local JSON
+file read and should be near-instant, so this shouldn't trigger for
+legitimate operation.
 
 Whether writing to the clipboard from an automatic (non-user-triggered)
 poll works on every platform is untested as of Phase 4 — see the
-Wayland/GNOME focus finding in the design review for Phase 2. Verify
-this on Ubuntu once the poller is wired into a real GUI event loop.
+Wayland/GNOME focus finding in the design review for Phase 2.
 """
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from enum import Enum
 
-from cbs.app.models import ReceiveStatus
 from cbs.app.service import ClipboardService
+from cbs.clipboard.models import ClipboardContent
 from cbs.storage.models import ClipboardItemMetadata
 
 logger = logging.getLogger(__name__)
 
 _DISCONNECTED_INITIAL_INTERVAL_SECONDS = 5.0
 _DISCONNECTED_MAX_INTERVAL_SECONDS = 30.0
+_SLOW_RESPONSE_THRESHOLD_SECONDS = 3.0
 
 
 class PollStatus(str, Enum):
@@ -43,6 +63,7 @@ class PollStatus(str, Enum):
 class PollOutcome:
     status: PollStatus
     metadata: ClipboardItemMetadata | None = None
+    content: ClipboardContent | None = None
     error: str | None = None
 
 
@@ -59,12 +80,20 @@ class AutoReceivePoller:
         return self._current_interval
 
     def poll_once(self) -> PollOutcome:
+        start = time.monotonic()
         try:
             current = self._service.peek_current()
         except OSError as exc:
             self._register_failure()
             logger.warning("Auto-receive poll failed (NAS unreachable?): %s", exc)
             return PollOutcome(status=PollStatus.ERROR, error=str(exc))
+
+        elapsed = time.monotonic() - start
+        if elapsed > _SLOW_RESPONSE_THRESHOLD_SECONDS:
+            self._register_failure()
+            message = f"NASの応答がありません({elapsed:.1f}秒でタイムアウト)"
+            logger.warning("Auto-receive poll: %s", message)
+            return PollOutcome(status=PollStatus.ERROR, error=message)
 
         self._register_success()
 
@@ -77,15 +106,15 @@ class AutoReceivePoller:
         if current.item_id == self._last_item_id:
             return PollOutcome(status=PollStatus.ALREADY_PROCESSED, metadata=current)
 
-        result = self._service.receive()
-        if result.metadata is not None:
-            self._last_item_id = result.metadata.item_id
+        try:
+            content = self._service.fetch_content_for(current)
+        except OSError as exc:
+            self._register_failure()
+            logger.warning("Auto-receive poll failed to fetch item content: %s", exc)
+            return PollOutcome(status=PollStatus.ERROR, error=str(exc))
 
-        if result.status is ReceiveStatus.RECEIVED:
-            return PollOutcome(status=PollStatus.RECEIVED, metadata=result.metadata)
-        if result.status is ReceiveStatus.IGNORED_OWN_CLIENT:
-            return PollOutcome(status=PollStatus.IGNORED_OWN_CLIENT, metadata=result.metadata)
-        return PollOutcome(status=PollStatus.NOTHING_AVAILABLE, metadata=result.metadata)
+        self._last_item_id = current.item_id
+        return PollOutcome(status=PollStatus.RECEIVED, metadata=current, content=content)
 
     def _register_failure(self) -> None:
         if self._consecutive_failures == 0:

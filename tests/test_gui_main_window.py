@@ -138,6 +138,31 @@ def test_auto_receive_checkbox_starts_and_stops_polling(qtbot: QtBot, tmp_path: 
     assert settings.auto_receive_enabled is False
 
 
+def test_auto_receive_writes_new_item_via_background_worker(qtbot: QtBot, tmp_path: Path) -> None:
+    nas_dir = tmp_path / "nas"
+    storage = NasStorageBackend(nas_dir)
+    storage.prepare_for_startup()
+    other_service = ClipboardService(
+        storage,
+        FakeClipboardAdapter(ClipboardContent.from_text("auto-received via worker")),
+        client_id="other-client",
+        client_name="Ryzen3",
+        received_files_dir=tmp_path / "received-other",
+    )
+    other_service.send()
+
+    settings = _make_settings(nas_shared_folder=str(nas_dir), client_id="client-a")
+    clipboard = FakeClipboardAdapter()
+    window = MainWindow(settings, tmp_path / "config.json", clipboard)
+    qtbot.addWidget(window)
+
+    window._auto_receive_checkbox.setChecked(True)
+
+    qtbot.waitUntil(lambda: "自動受信しました" in window._status_label.text(), timeout=3000)
+    assert clipboard.content is not None
+    assert clipboard.content.text == "auto-received via worker"
+
+
 def test_interval_change_updates_settings(qtbot: QtBot, tmp_path: Path) -> None:
     nas_dir = tmp_path / "nas"
     settings = _make_settings(nas_shared_folder=str(nas_dir))

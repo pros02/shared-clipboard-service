@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from cbs.app.poller import AutoReceivePoller, PollStatus
@@ -103,6 +104,9 @@ def test_poll_once_ignores_own_client_item(tmp_path: Path) -> None:
 
 
 def test_poll_once_receives_new_item_from_other_client(tmp_path: Path) -> None:
+    # poll_once() never touches the clipboard itself (so it's safe to run
+    # off the main thread) — it returns content for the *caller* to write,
+    # same as a real GUI would do on poll_once()'s success signal.
     poller, storage, adapter = _make_poller(tmp_path, client_id="client-b")
     sender = ClipboardService(
         storage,
@@ -116,13 +120,13 @@ def test_poll_once_receives_new_item_from_other_client(tmp_path: Path) -> None:
     outcome = poller.poll_once()
 
     assert outcome.status is PollStatus.RECEIVED
-    assert adapter.content is not None
-    assert adapter.content.text == "hello"
-    assert len(adapter.written) == 1
+    assert outcome.content is not None
+    assert outcome.content.text == "hello"
+    assert adapter.written == []  # poller itself never writes
 
 
 def test_poll_once_does_not_rewrite_unchanged_item(tmp_path: Path) -> None:
-    poller, storage, adapter = _make_poller(tmp_path, client_id="client-b")
+    poller, storage, _adapter = _make_poller(tmp_path, client_id="client-b")
     sender = ClipboardService(
         storage,
         FakeClipboardAdapter(ClipboardContent.from_text("hello")),
@@ -136,12 +140,13 @@ def test_poll_once_does_not_rewrite_unchanged_item(tmp_path: Path) -> None:
     second = poller.poll_once()
 
     assert first.status is PollStatus.RECEIVED
+    assert first.content is not None
     assert second.status is PollStatus.ALREADY_PROCESSED
-    assert len(adapter.written) == 1
+    assert second.content is None
 
 
 def test_poll_once_receives_replacement_item(tmp_path: Path) -> None:
-    poller, storage, adapter = _make_poller(tmp_path, client_id="client-b")
+    poller, storage, _adapter = _make_poller(tmp_path, client_id="client-b")
     sender_adapter = FakeClipboardAdapter(ClipboardContent.from_text("first"))
     sender = ClipboardService(
         storage,
@@ -158,9 +163,53 @@ def test_poll_once_receives_replacement_item(tmp_path: Path) -> None:
     outcome = poller.poll_once()
 
     assert outcome.status is PollStatus.RECEIVED
-    assert adapter.content is not None
-    assert adapter.content.text == "second"
-    assert len(adapter.written) == 2
+    assert outcome.content is not None
+    assert outcome.content.text == "second"
+
+
+class SlowStorageBackend(StorageBackend):
+    """Simulates an unreachable NAS *host* (as opposed to a missing share
+    on a reachable one): read_current() doesn't raise, it just takes a
+    long time, matching what a real ~21s Windows network timeout looks
+    like from the caller's side. See poller.py's module docstring."""
+
+    def __init__(self, delay_seconds: float) -> None:
+        self._delay_seconds = delay_seconds
+
+    def prepare_for_startup(self) -> None:
+        pass
+
+    def write_item(self, item: NewClipboardItem) -> ClipboardItemMetadata:
+        raise NotImplementedError
+
+    def read_current(self) -> ClipboardItemMetadata | None:
+        time.sleep(self._delay_seconds)
+        return None
+
+    def read_object(self, item: ClipboardItemMetadata) -> bytes:
+        raise NotImplementedError
+
+    def list_history(self, limit: int | None = None) -> list[ClipboardItemMetadata]:
+        return []
+
+
+def test_poll_once_treats_slow_response_as_failure_even_without_exception(tmp_path: Path) -> None:
+    storage = SlowStorageBackend(delay_seconds=3.2)
+    adapter = FakeClipboardAdapter()
+    service = ClipboardService(
+        storage,
+        adapter,
+        client_id="client-a",
+        client_name="client-a",
+        received_files_dir=tmp_path / "received",
+    )
+    poller = AutoReceivePoller(service, interval_seconds=1.0)
+
+    outcome = poller.poll_once()
+
+    assert outcome.status is PollStatus.ERROR
+    assert outcome.error is not None
+    assert poller.next_interval_seconds == 5.0
 
 
 def test_poll_once_error_backs_off_up_to_cap(tmp_path: Path) -> None:

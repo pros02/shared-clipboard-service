@@ -87,6 +87,66 @@ def test_read_current_returns_none_on_corrupt_json(tmp_path: Path) -> None:
     assert backend.read_current() is None
 
 
+def test_read_current_returns_none_for_valid_json_missing_required_field(tmp_path: Path) -> None:
+    backend = NasStorageBackend(tmp_path)
+    backend.prepare_for_startup()
+    # Valid JSON, but missing "sha256" — a different failure mode than
+    # outright corrupt JSON (e.g. a future schema change, hand-edited file).
+    (tmp_path / "current" / "current.json").write_text(
+        '{"schema_version": 1, "item_id": "x", "client_id": "c", "client_name": "n", '
+        '"created_at_utc": "t", "type": "text", "mime_type": "text/plain", '
+        '"object_path": "objects/x.txt", "original_name": "x.txt", "size_bytes": 1}',
+        encoding="utf-8",
+    )
+
+    assert backend.read_current() is None
+
+
+def test_list_history_skips_entry_with_invalid_type_value(tmp_path: Path) -> None:
+    backend = NasStorageBackend(tmp_path)
+    backend.prepare_for_startup()
+    good = backend.write_item(_make_item(b"good"))
+    (tmp_path / "history" / "bogus.json").write_text(
+        '{"schema_version": 1, "item_id": "y", "client_id": "c", "client_name": "n", '
+        '"created_at_utc": "t", "type": "not-a-real-type", "mime_type": "text/plain", '
+        '"object_path": "objects/y.txt", "original_name": "y.txt", "size_bytes": 1, '
+        '"sha256": "deadbeef", "text_encoding": null}',
+        encoding="utf-8",
+    )
+
+    history = backend.list_history()
+
+    assert [entry.item_id for entry in history] == [good.item_id]
+
+
+def test_write_item_failure_before_current_update_leaves_previous_current_intact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Simulate a crash between writing the history entry and updating
+    current.json (e.g. process killed, NAS disconnects mid-operation).
+    The object and history entry for the failed item may be orphaned, but
+    the previously-current item must stay intact and readable — no partial
+    or corrupted current.json."""
+    backend = NasStorageBackend(tmp_path)
+    backend.prepare_for_startup()
+    first = backend.write_item(_make_item(b"first"))
+
+    original_replace_current = backend._replace_current
+
+    def _boom(metadata: object) -> None:
+        raise OSError("simulated NAS disconnect mid-write")
+
+    monkeypatch.setattr(backend, "_replace_current", _boom)
+    with pytest.raises(OSError):
+        backend.write_item(_make_item(b"second"))
+
+    monkeypatch.setattr(backend, "_replace_current", original_replace_current)
+    current = backend.read_current()
+    assert current is not None
+    assert current.item_id == first.item_id
+    assert backend.read_object(current) == b"first"
+
+
 def test_list_history_sorted_newest_first_and_respects_limit(tmp_path: Path) -> None:
     backend = NasStorageBackend(tmp_path)
     backend.prepare_for_startup()

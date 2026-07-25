@@ -16,8 +16,32 @@ from cbs.app.service import ClipboardService, _check_size
 from cbs.clipboard.base import ClipboardAdapter
 from cbs.clipboard.models import ClipboardContent
 from cbs.domain import ItemType
+from cbs.storage.base import StorageBackend
+from cbs.storage.models import ClipboardItemMetadata, NewClipboardItem
 from cbs.storage.nas_backend import NasStorageBackend
 from tests.fakes import FakeClipboardAdapter
+
+
+class _WriteFailsStorageBackend(StorageBackend):
+    """Wraps a real backend but simulates the NAS disappearing mid-send."""
+
+    def __init__(self, delegate: StorageBackend) -> None:
+        self._delegate = delegate
+
+    def prepare_for_startup(self) -> None:
+        self._delegate.prepare_for_startup()
+
+    def write_item(self, item: NewClipboardItem) -> ClipboardItemMetadata:
+        raise OSError("simulated NAS disconnect during send")
+
+    def read_current(self) -> ClipboardItemMetadata | None:
+        return self._delegate.read_current()
+
+    def read_object(self, item: ClipboardItemMetadata) -> bytes:
+        return self._delegate.read_object(item)
+
+    def list_history(self, limit: int | None = None) -> list[ClipboardItemMetadata]:
+        return self._delegate.list_history(limit)
 
 
 def _make_service(
@@ -107,6 +131,28 @@ def test_send_directory_raises(tmp_path: Path) -> None:
 
     with pytest.raises(UnsupportedClipboardContentError):
         service.send()
+
+
+def test_send_propagates_storage_failure_without_swallowing_it(tmp_path: Path) -> None:
+    real_storage = NasStorageBackend(tmp_path / "nas")
+    real_storage.prepare_for_startup()
+    failing_storage = _WriteFailsStorageBackend(real_storage)
+    adapter = FakeClipboardAdapter(ClipboardContent.from_text("hello"))
+    service = ClipboardService(
+        failing_storage,
+        adapter,
+        client_id="client-a",
+        client_name="Ryzen7",
+        received_files_dir=tmp_path / "received",
+    )
+
+    with pytest.raises(OSError, match="simulated NAS disconnect"):
+        service.send()
+
+    # The failure must not be silently absorbed — nothing should appear as
+    # having been sent.
+    assert real_storage.read_current() is None
+    assert real_storage.list_history() == []
 
 
 def test_send_oversized_text_raises(tmp_path: Path) -> None:

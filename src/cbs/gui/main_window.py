@@ -29,7 +29,7 @@ from PySide6.QtWidgets import (
 
 from cbs import platform
 from cbs.app.errors import EmptyClipboardError
-from cbs.app.poller import AutoReceivePoller, PollStatus
+from cbs.app.poller import AutoReceivePoller, PollOutcome, PollStatus
 from cbs.app.service import ClipboardService
 from cbs.clipboard.base import ClipboardAdapter
 from cbs.clipboard.models import ClipboardContent
@@ -68,6 +68,7 @@ class MainWindow(QMainWindow):
         self._poller: AutoReceivePoller | None = None
         self._active_worker: CallableWorker | None = None
         self._preview_worker: CallableWorker | None = None
+        self._poll_worker: CallableWorker | None = None
 
         self._build_widgets()
 
@@ -377,13 +378,38 @@ class MainWindow(QMainWindow):
     def _on_poll_timer_tick(self) -> None:
         if self._poller is None:
             return
-        outcome = self._poller.poll_once()
-        if outcome.status is PollStatus.RECEIVED and outcome.metadata is not None:
-            self._set_status(f"自動受信しました: {outcome.metadata.original_name}")
+        poller = self._poller
+        # poll_once() can block for a long time against an unreachable NAS
+        # host (observed ~21s in practice) and never touches the clipboard
+        # itself, so it's safe — and necessary — to run off the main thread.
+        worker = CallableWorker(poller.poll_once)
+        worker.succeeded.connect(self._on_poll_result)
+        worker.failed.connect(self._on_poll_worker_crashed)
+        worker.finished.connect(self._on_poll_worker_finished)
+        worker.finished.connect(worker.deleteLater)
+        self._poll_worker = worker
+        worker.start()
+
+    def _on_poll_result(self, outcome: object) -> None:
+        if not isinstance(outcome, PollOutcome):
+            return
+        if outcome.status is PollStatus.RECEIVED and outcome.content is not None:
+            self._clipboard.write(outcome.content)
+            name = outcome.metadata.original_name if outcome.metadata is not None else ""
+            self._set_status(f"自動受信しました: {name}")
             self._refresh_preview()
         elif outcome.status is PollStatus.ERROR:
             self._set_status(f"自動受信エラー: {outcome.error}")
         self._schedule_next_poll()
+
+    def _on_poll_worker_crashed(self, message: str) -> None:
+        # poll_once() itself catches OSError into PollOutcome(status=ERROR),
+        # so reaching here means something unexpected happened in the worker.
+        logger.error("Unexpected auto-receive poll worker failure: %s", message)
+        self._schedule_next_poll()
+
+    def _on_poll_worker_finished(self) -> None:
+        self._poll_worker = None
 
     def _on_auto_receive_toggled(self, checked: bool) -> None:
         self._settings.auto_receive_enabled = checked
