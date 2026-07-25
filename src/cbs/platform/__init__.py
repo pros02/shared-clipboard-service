@@ -9,8 +9,8 @@ from __future__ import annotations
 import sys
 
 if sys.platform == "win32":
-    from cbs.platform._windows import get_config_dir, get_log_dir
+    from cbs.platform._windows import get_config_dir, get_log_dir, get_received_files_dir
 else:
-    from cbs.platform._linux import get_config_dir, get_log_dir
+    from cbs.platform._linux import get_config_dir, get_log_dir, get_received_files_dir
 
-__all__ = ["get_config_dir", "get_log_dir"]
+__all__ = ["get_config_dir", "get_log_dir", "get_received_files_dir"]
