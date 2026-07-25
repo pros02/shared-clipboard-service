@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "client_id": "",
+  "client_name": "",
+  "nas_shared_folder": "",
+  "auto_receive_enabled": false,
+  "poll_interval_seconds": 1.0,
+  "history_display_count": 20,
+  "max_retained_items": 50,
+  "max_retained_total_bytes": 2147483648,
+  "start_on_login": false,
+  "log_level": "INFO"
+}
