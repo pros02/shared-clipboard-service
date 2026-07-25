@@ -13,9 +13,12 @@ SSH session) and follow the prompts:
 from __future__ import annotations
 
 import os
+import time
+
+from PySide6.QtGui import QGuiApplication
 
 from cbs.clipboard.models import ClipboardContent
-from cbs.clipboard.qt_adapter import QtClipboardAdapter
+from cbs.clipboard.qt_adapter import QtClipboardAdapter, _pump_events
 from cbs.domain import ItemType
 
 
@@ -30,6 +33,23 @@ def _describe(content: ClipboardContent | None) -> str:
     return "FILES: " + ", ".join(str(p) for p in content.file_paths)
 
 
+def _wait_and_pump(prompt: str) -> None:
+    input(prompt)
+    # input() blocks Python entirely, so the Qt event loop gets no chance to
+    # process anything the compositor sent while we were waiting. Pump in a
+    # loop for up to ~1s afterward to drain any backlog before reading.
+    for _ in range(20):
+        _pump_events(50)
+        time.sleep(0.05)
+
+
+def _print_raw_mime_diagnostics() -> None:
+    clipboard = QGuiApplication.clipboard()
+    mime = clipboard.mimeData() if clipboard is not None else None
+    formats = list(mime.formats()) if mime is not None else []
+    print(f"   [diagnostic] raw Qt mime formats currently offered: {formats}")
+
+
 def main() -> None:
     adapter = QtClipboardAdapter()
 
@@ -37,21 +57,24 @@ def main() -> None:
     print(f"XDG_SESSION_TYPE={os.environ.get('XDG_SESSION_TYPE', '(not set, likely Windows)')}")
     print()
 
-    input("1) Copy some plain TEXT in another app, then press Enter here...")
+    _wait_and_pump("1) Copy some plain TEXT in another app, then press Enter here...")
+    _print_raw_mime_diagnostics()
     print("   Detected:", _describe(adapter.read()))
     print()
 
-    input(
+    _wait_and_pump(
         "2) Copy an IMAGE in another app (e.g. a screenshot tool or image "
         "viewer's 'copy image'), then press Enter here..."
     )
+    _print_raw_mime_diagnostics()
     print("   Detected:", _describe(adapter.read()))
     print()
 
-    input(
+    _wait_and_pump(
         "3) Copy one or more FILES in your file manager (Explorer / "
         "Nautilus), then press Enter here..."
     )
+    _print_raw_mime_diagnostics()
     print("   Detected:", _describe(adapter.read()))
     print()
 
