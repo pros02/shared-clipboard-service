@@ -9,8 +9,29 @@ from __future__ import annotations
 import sys
 
 if sys.platform == "win32":
-    from cbs.platform._windows import get_config_dir, get_log_dir, get_received_files_dir
+    from cbs.platform._windows import (
+        disable_start_on_login,
+        enable_start_on_login,
+        get_config_dir,
+        get_log_dir,
+        get_received_files_dir,
+        is_start_on_login_enabled,
+    )
 else:
-    from cbs.platform._linux import get_config_dir, get_log_dir, get_received_files_dir
+    from cbs.platform._linux import (
+        disable_start_on_login,
+        enable_start_on_login,
+        get_config_dir,
+        get_log_dir,
+        get_received_files_dir,
+        is_start_on_login_enabled,
+    )
 
-__all__ = ["get_config_dir", "get_log_dir", "get_received_files_dir"]
+__all__ = [
+    "disable_start_on_login",
+    "enable_start_on_login",
+    "get_config_dir",
+    "get_log_dir",
+    "get_received_files_dir",
+    "is_start_on_login_enabled",
+]

@@ -37,6 +37,7 @@ from cbs.config.settings import POLL_INTERVAL_CHOICES, Settings, save_settings
 from cbs.domain import ItemType
 from cbs.gui.formatting import type_label
 from cbs.gui.history_dialog import HistoryDialog
+from cbs.gui.settings_dialog import SettingsDialog
 from cbs.gui.workers import CallableWorker
 from cbs.storage.models import ClipboardItemMetadata
 from cbs.storage.nas_backend import NasStorageBackend
@@ -118,9 +119,12 @@ class MainWindow(QMainWindow):
         self._receive_button.clicked.connect(self._on_receive_clicked)
         self._history_button = QPushButton("履歴")
         self._history_button.clicked.connect(self._on_history_clicked)
+        self._settings_button = QPushButton("設定")
+        self._settings_button.clicked.connect(self._on_settings_clicked)
         button_row.addWidget(self._send_button)
         button_row.addWidget(self._receive_button)
         button_row.addWidget(self._history_button)
+        button_row.addWidget(self._settings_button)
         layout.addLayout(button_row)
 
         auto_row = QHBoxLayout()
@@ -278,6 +282,12 @@ class MainWindow(QMainWindow):
             limit=self._settings.history_display_count,
             parent=self,
         )
+        dialog.exec()
+
+    # -- settings ----------------------------------------------------------------
+
+    def _on_settings_clicked(self) -> None:
+        dialog = SettingsDialog(self._settings, self._settings_path, parent=self)
         dialog.exec()
 
     # -- preview -----------------------------------------------------------------
