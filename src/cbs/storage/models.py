@@ -7,16 +7,13 @@ each history/<item_id>.json record.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from enum import Enum
 from typing import Any
+
+from cbs.domain import ItemType
 
 SCHEMA_VERSION = 1
 
-
-class ItemType(str, Enum):
-    TEXT = "text"
-    IMAGE = "image"
-    FILE = "file"
+__all__ = ["SCHEMA_VERSION", "ClipboardItemMetadata", "ItemType", "NewClipboardItem"]
 
 
 @dataclass(frozen=True)
