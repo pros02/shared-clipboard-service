@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "shared-clipboard-service"
-version = "0.1.0"
+version = "1.0.0"
 description = "Cross-platform clipboard sharing service between Windows 11 and Ubuntu over a NAS SMB share."
 readme = "README.md"
 requires-python = ">=3.11"
