@@ -5,10 +5,11 @@ Windows 11 と Ubuntu 26.04 間で、NAS共有フォルダを介して
 
 ## Status
 
-Phase 0: project scaffolding (package layout, local config loading,
-logging). No clipboard, storage, or GUI functionality yet — see
+Phase 0–7 完了(足場作り、NASストレージ層、クリップボードアダプタ、送受信
+オーケストレーション、自動受信ポーリング、GUI、起動時常駐)。パッケージング
+(Phase 8)対応中。設計の詳細は
 [docs/design/requirements_review_v0.1.md](docs/design/requirements_review_v0.1.md)
-for the full design review and phased implementation plan.
+を参照。
 
 ## Target Platforms
 
@@ -36,11 +37,43 @@ Run the tests:
 pytest
 ```
 
-Run the current scaffolding (loads config, initializes logging; no GUI yet):
+Run the app:
 
 ```bash
 python -m cbs
 ```
+
+## Installing (end users)
+
+### Windows
+
+Build a standalone executable with PyInstaller (no Python install
+required to run the result):
+
+```powershell
+pip install -e ".[build]"
+pyinstaller packaging\cbs.spec
+```
+
+The executable is written to `dist\SharedClipboardService.exe`. Copy it
+wherever you like and run it directly.
+
+### Ubuntu
+
+```bash
+chmod +x packaging/linux/install.sh
+./packaging/linux/install.sh
+```
+
+This creates a dedicated venv under `~/.local/share/shared-clipboard-service/`,
+installs the app into it, and adds a desktop entry so it shows up in your
+application menu. If it fails to start with a Qt platform plugin error,
+install the missing system library it names (commonly
+`sudo apt install libxcb-cursor0`).
+
+Either way, use the app's own **設定** (Settings) dialog to enable
+"ログイン時に自動起動する" (start on login) — no separate OS configuration
+needed.
 
 ## Configuration
 

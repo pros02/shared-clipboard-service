@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -7,7 +8,19 @@ from pytestqt.qtbot import QtBot
 
 from cbs import platform
 from cbs.config.settings import Settings
-from cbs.gui.settings_dialog import SettingsDialog
+from cbs.gui.settings_dialog import SettingsDialog, _resolve_launch_command
+
+
+def test_resolve_launch_command_uses_module_flag_when_not_frozen(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delattr(sys, "frozen", raising=False)
+
+    assert _resolve_launch_command() == [sys.executable, "-m", "cbs"]
+
+
+def test_resolve_launch_command_uses_bare_executable_when_frozen(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+
+    assert _resolve_launch_command() == [sys.executable]
 
 
 def test_dialog_reflects_current_state(qtbot: QtBot, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

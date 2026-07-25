@@ -26,6 +26,18 @@ _HISTORY_COUNT_MIN = 1
 _HISTORY_COUNT_MAX = 200
 
 
+def _resolve_launch_command() -> list[str]:
+    """Return the command that should relaunch this app at login.
+
+    A PyInstaller-frozen build's sys.executable *is* the app itself, with
+    no separate "cbs" module to invoke via -m; a source/venv install
+    needs "-m cbs" to tell the interpreter what to run.
+    """
+    if getattr(sys, "frozen", False):
+        return [sys.executable]
+    return [sys.executable, "-m", "cbs"]
+
+
 class SettingsDialog(QDialog):
     def __init__(
         self,
@@ -65,7 +77,7 @@ class SettingsDialog(QDialog):
 
         want_enabled = self._start_on_login_checkbox.isChecked()
         if want_enabled:
-            platform.enable_start_on_login([sys.executable, "-m", "cbs"])
+            platform.enable_start_on_login(_resolve_launch_command())
         else:
             platform.disable_start_on_login()
         self._settings.start_on_login = want_enabled
