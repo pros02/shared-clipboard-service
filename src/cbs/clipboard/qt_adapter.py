@@ -5,6 +5,15 @@ plugin (Win32 on Windows; X11 or Wayland on Ubuntu), so a single
 implementation covers both target platforms without OS-specific code
 here. Initial scope is limited to plain text, PNG images, and local file
 references (see docs/design/requirements_review_v0.1.md).
+
+Wayland ties clipboard access to a real, focusable surface rather than
+allowing a fully windowless client to read/write the selection (unlike
+X11, which is more permissive here). A windowless QGuiApplication was
+confirmed unable to read clipboard content set by other apps on Ubuntu
+26.04/GNOME/Wayland. To work around this, a tiny off-screen window is
+kept alive for the process lifetime, and the Qt event loop is pumped
+around clipboard access so Wayland's asynchronous data-offer protocol
+has a chance to complete.
 """
 from __future__ import annotations
 
@@ -12,8 +21,9 @@ import logging
 import tempfile
 from pathlib import Path
 
-from PySide6.QtCore import QMimeData, QUrl
+from PySide6.QtCore import QEventLoop, QMimeData, QUrl
 from PySide6.QtGui import QClipboard, QGuiApplication, QImage
+from PySide6.QtWidgets import QApplication, QWidget
 
 from cbs.clipboard.base import ClipboardAdapter
 from cbs.clipboard.models import ClipboardContent
@@ -21,10 +31,26 @@ from cbs.domain import ItemType
 
 logger = logging.getLogger(__name__)
 
+_EVENT_PUMP_MAX_MS = 200
+
+_hidden_window: QWidget | None = None
+
+
+def _pump_events(max_time_ms: int = _EVENT_PUMP_MAX_MS) -> None:
+    app = QGuiApplication.instance()
+    if app is not None:
+        app.processEvents(QEventLoop.ProcessEventsFlag.AllEvents, max_time_ms)
+
 
 def _ensure_application() -> None:
-    if QGuiApplication.instance() is None:
-        QGuiApplication([])
+    global _hidden_window
+    if QApplication.instance() is None:
+        QApplication([])
+    if _hidden_window is None:
+        _hidden_window = QWidget()
+        _hidden_window.setGeometry(-10000, -10000, 1, 1)
+        _hidden_window.show()
+        _pump_events()
 
 
 def _image_to_png_bytes(image: QImage) -> bytes:
@@ -50,6 +76,7 @@ class QtClipboardAdapter(ClipboardAdapter):
 
     def read(self) -> ClipboardContent | None:
         clipboard = self._clipboard()
+        _pump_events()
         mime = clipboard.mimeData()
         if mime is None:
             return None
@@ -87,3 +114,5 @@ class QtClipboardAdapter(ClipboardAdapter):
             mime = QMimeData()
             mime.setUrls([QUrl.fromLocalFile(str(path)) for path in content.file_paths])
             clipboard.setMimeData(mime)
+
+        _pump_events()
