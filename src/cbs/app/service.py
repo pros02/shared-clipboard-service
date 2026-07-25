@@ -61,11 +61,27 @@ class ClipboardService:
         """
         return self._storage.read_current()
 
+    def list_history(self, limit: int | None = None) -> list[ClipboardItemMetadata]:
+        return self._storage.list_history(limit)
+
+    def copy_history_item_to_clipboard(self, metadata: ClipboardItemMetadata) -> None:
+        """Re-copy a history entry to the local clipboard, regardless of client_id."""
+        content = self.fetch_content_for(metadata)
+        self._clipboard.write(content)
+
     def send(self) -> ClipboardItemMetadata:
         content = self._clipboard.read()
         if content is None:
             raise EmptyClipboardError()
+        return self.send_content(content)
 
+    def send_content(self, content: ClipboardContent) -> ClipboardItemMetadata:
+        """Validate and persist already-captured clipboard content.
+
+        Does not touch the clipboard itself, so — unlike send() — this is
+        safe to run on a background thread (e.g. so hashing/uploading a
+        large file doesn't freeze a GUI's main thread).
+        """
         new_item = self._build_new_item(content)
         return self._storage.write_item(new_item)
 
@@ -76,10 +92,18 @@ class ClipboardService:
         if current.client_id == self._client_id:
             return ReceiveResult(status=ReceiveStatus.IGNORED_OWN_CLIENT, metadata=current)
 
-        data = self._storage.read_object(current)
-        content = self._content_from_metadata(current, data)
+        content = self.fetch_content_for(current)
         self._clipboard.write(content)
         return ReceiveResult(status=ReceiveStatus.RECEIVED, metadata=current)
+
+    def fetch_content_for(self, metadata: ClipboardItemMetadata) -> ClipboardContent:
+        """Read a stored item's bytes and stage them as ClipboardContent.
+
+        Does not touch the clipboard itself, so — unlike receive() — this
+        is safe to run on a background thread.
+        """
+        data = self._storage.read_object(metadata)
+        return self._content_from_metadata(metadata, data)
 
     def _build_new_item(self, content: ClipboardContent) -> NewClipboardItem:
         if content.type is ItemType.TEXT:

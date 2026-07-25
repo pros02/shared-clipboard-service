@@ -1,5 +1,12 @@
 """PySide6 GUI layer.
 
-Contains presentation only; must not hold business logic (see CLAUDE.md).
-Implemented in Phase 6. See docs/design/requirements_review_v0.1.md.
+Contains presentation only; business rules live in cbs.app/cbs.storage
+(see CLAUDE.md: "do not put business logic directly in GUI classes").
+`cbs.gui.app.main()` is the composition root that wires everything
+together and shows `MainWindow`.
 """
+from __future__ import annotations
+
+from cbs.gui.main_window import MainWindow
+
+__all__ = ["MainWindow"]
