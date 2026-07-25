@@ -1,6 +1,20 @@
 """Storage abstraction layer.
 
-The NAS-backed implementation (current/objects/history/temp handling,
-current.json schema, atomic writes, retention policy) is implemented in
-Phase 1. See docs/design/requirements_review_v0.1.md.
+`StorageBackend` is the interface the application layer depends on;
+`NasStorageBackend` is the initial implementation backed by the NAS SMB
+share. A future SQLite or REST API backend can implement the same
+interface without changing callers (see CLAUDE.md architecture rules).
 """
+from __future__ import annotations
+
+from cbs.storage.base import StorageBackend
+from cbs.storage.models import ClipboardItemMetadata, ItemType, NewClipboardItem
+from cbs.storage.nas_backend import NasStorageBackend
+
+__all__ = [
+    "ClipboardItemMetadata",
+    "ItemType",
+    "NasStorageBackend",
+    "NewClipboardItem",
+    "StorageBackend",
+]
