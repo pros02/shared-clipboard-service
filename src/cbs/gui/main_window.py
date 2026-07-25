@@ -182,6 +182,7 @@ class MainWindow(QMainWindow):
         self._receive_button.setEnabled(enabled)
         self._history_button.setEnabled(enabled)
         self._auto_receive_checkbox.setEnabled(enabled)
+        self._interval_combo.setEnabled(enabled)
 
     # -- folder selection ------------------------------------------------------
 

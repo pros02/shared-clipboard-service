@@ -36,6 +36,8 @@ def test_no_folder_configured_disables_actions(qtbot: QtBot, tmp_path: Path) -> 
     assert not window._send_button.isEnabled()
     assert not window._receive_button.isEnabled()
     assert not window._history_button.isEnabled()
+    assert not window._auto_receive_checkbox.isEnabled()
+    assert not window._interval_combo.isEnabled()
 
 
 def test_folder_configured_enables_actions(qtbot: QtBot, tmp_path: Path) -> None:
