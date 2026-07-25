@@ -49,6 +49,18 @@ class ClipboardService:
         self._client_name = client_name
         self._received_files_dir = received_files_dir
 
+    @property
+    def client_id(self) -> str:
+        return self._client_id
+
+    def peek_current(self) -> ClipboardItemMetadata | None:
+        """Return the NAS's current item metadata without touching the clipboard.
+
+        Used by AutoReceivePoller to decide whether a new item is worth
+        receiving before paying the cost of a clipboard write.
+        """
+        return self._storage.read_current()
+
     def send(self) -> ClipboardItemMetadata:
         content = self._clipboard.read()
         if content is None:
